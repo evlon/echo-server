@@ -40,6 +40,23 @@ PORT=9090 node echo-server.mjs  # 自定义端口
 
 无需依赖，纯 `node:http` 零 npm 包。
 
+## 配置项（环境变量）
+
+源码**不含任何公司域名**——域名一律通过环境变量注入，仓库内默认值是脱敏示例域名：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ECHO_HOST` | `echo.ai.example.com` | 本服务对外域名（页面展示 + 退出登录后回跳地址） |
+| `AUTH_HOST` | `auth.example.com` | Keycloak 域名（真正注销 SSO 的 `end_session_endpoint`） |
+| `AUTH_REALM` | `employees` | Keycloak realm 名 |
+| `PORT` | `8080` | 监听端口 |
+
+部署到真实环境时，由 K8S Deployment / 网关注入真实域名即可：
+
+```bash
+ECHO_HOST=echo.ai.ict.cmcc AUTH_HOST=auth.ict.cmcc AUTH_REALM=employees node echo-server.mjs
+```
+
 ## 身份字段说明
 
 | 字段 | 来源 |

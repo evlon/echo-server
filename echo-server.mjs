@@ -7,7 +7,7 @@
  *   - 加「退出登录」按钮：按 Accept 头分流，浏览器渲染 HTML 页面（带退出按钮），
  *     其它客户端仍返回 JSON，不破坏既有测试与 API 调用方。
  *   - 加 Cache-Control: no-store：确保浏览器每次访问都经过网关 OIDC 插件拦截/
- *     重定向到 auth.ict.cmcc 登录，而不是被浏览器缓存的旧 HTML 页面骗过
+ *     重定向到 AUTH_HOST（Keycloak）登录，而不是被浏览器缓存的旧 HTML 页面骗过
  *     （否则看不到跳转登录）。
  *
  * 认证链路：
@@ -22,6 +22,15 @@
 import http from 'node:http'
 
 const PORT = Number(process.env.PORT || 8080)
+
+// —— 配置项（域名一律环境变量注入，默认值用脱敏示例域名）——
+// 线上部署时由 K8S/网关注入真实域名，仓库内不带任何公司域名。
+//   ECHO_HOST：本服务对外域名（用于页面展示 + 退出登录后的回跳地址）
+//   AUTH_HOST：Keycloak 域名（用于真正注销 SSO 会话的 end_session_endpoint）
+const ECHO_HOST = process.env.ECHO_HOST || 'echo.ai.example.com'
+const AUTH_HOST = process.env.AUTH_HOST || 'auth.example.com'
+// Keycloak realm 路径（employees 等），默认示例 realm 名
+const AUTH_REALM = process.env.AUTH_REALM || 'employees'
 
 // Higress 的 jwt-auth claims_to_headers 把 JWT 的 UTF-8 中文字段原样写进 header，
 // 而 Node 的 req.headers 按 latin-1 解码 header 值 → 中文变成乱码（如 “刘彦龙”→“çæäº®”）。
@@ -108,6 +117,11 @@ function renderPage(identity, consumer) {
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ))
+  // 退出登录：rd 指向 Keycloak end_session_endpoint，真正注销 SSO 会话，
+  // 并带 post_logout_redirect_uri 回跳本服务。域名全部来自配置项（见文件头部）。
+  const endSessionUrl = `https://${AUTH_HOST}/realms/${AUTH_REALM}/protocol/openid-connect/logout` +
+    `?post_logout_redirect_uri=${encodeURIComponent(`https://${ECHO_HOST}/`)}`
+  const logoutHref = `/oauth2/sign_out?rd=${encodeURIComponent(endSessionUrl)}`
   const rows = [
     ['用户名 (username)', identity.username],
     ['姓名 (name)', identity.name],
@@ -158,7 +172,7 @@ function renderPage(identity, consumer) {
   <div class="card">
     <div class="head">
       <h1>🔐 echo 身份回显</h1>
-      <p>echo.ai.ict.cmcc · Keycloak(employees) OIDC 认证</p>
+      <p>${esc(ECHO_HOST)} · Keycloak(${esc(AUTH_REALM)}) OIDC 认证</p>
     </div>
     <div class="body">
       <span class="status ${loggedIn ? 'on' : 'off'}">${loggedIn ? '已认证' : '未认证'}</span>
@@ -166,12 +180,12 @@ function renderPage(identity, consumer) {
         ${tr}
       </table>
       <div class="actions">
-        <a class="btn btn-logout" href="/oauth2/sign_out?rd=https%3A%2F%2Fauth.ict.cmcc%2Frealms%2Femployees%2Fprotocol%2Fopenid-connect%2Flogout%3Fpost_logout_redirect_uri%3Dhttps%253A%252F%252Fecho.ai.ict.cmcc%252F">退出登录</a>
+        <a class="btn btn-logout" href="${logoutHref}">退出登录</a>
         <a class="btn btn-home" href="/">刷新</a>
       </div>
       <p class="hint">
         点击「退出登录」会清除本服务会话 Cookie，并跳转到
-        <code>auth.ict.cmcc</code> 注销 Keycloak SSO 会话，再回到本页，方便反复测试。
+        <code>${esc(AUTH_HOST)}</code> 注销 Keycloak SSO 会话，再回到本页，方便反复测试。
       </p>
     </div>
   </div>
@@ -216,7 +230,7 @@ const server = http.createServer((req, res) => {
     const accept = (req.headers['accept'] || '').toLowerCase()
     if (accept.includes('text/html')) {
       // 不缓存：保证每次访问都经过网关 OIDC 拦截/重定向到登录，
-      // 而不是被浏览器缓存的旧页面骗过（否则看不到跳转 auth.ict.cmcc）
+      // 而不是被浏览器缓存的旧页面骗过（否则看不到跳转 AUTH_HOST）
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
