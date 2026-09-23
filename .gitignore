@@ -1,0 +1,15 @@
+# 凭据 / token / 测试残留（严禁入仓）
+*testtoken*
+*.token
+*.pem
+.env
+.env.*
+*.key
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 系统
+.DS_Store
+Thumbs.db
