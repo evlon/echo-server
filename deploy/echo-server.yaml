@@ -1,0 +1,94 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# echo-server（配置化版）—— 身份回显服务 K8S 部署清单
+#
+# 与旧版「node:22-slim + ConfigMap 挂源码」的区别：
+#   这次把配置化源码打进专属镜像 echo-server，由 env 注入真实域名 ——
+#   镜像本身不含任何公司域名（仓库默认值是 echo.ai.example.com）。
+#
+# ── 认证链路 ──────────────────────────────────────────────────────────────────
+#   浏览器：Higress oidc 插件 → Keycloak 登录 → 注入身份 → echo
+#   API   ：Bearer JWT → Higress jwt-auth（JWKS 验签）→ 注入 X-User-* → echo
+#
+# ── 无 worker 节点 ────────────────────────────────────────────────────────────
+#   所有 Pod 必须加 tolerations。
+# ══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-server
+  namespace: default
+  labels:
+    app: echo-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: echo-server
+  template:
+    metadata:
+      labels:
+        app: echo-server
+    spec:
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: echo-server
+          # ⭐ 配置化版专属镜像（由 echo-server/build.sh 构建并推送）
+          image: dockerhub.kubekey.local:31104/library/echo-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: TZ
+              value: "Asia/Shanghai"
+            # ⭐ 域名配置项：注入真实域名，镜像内无公司域名
+            - name: ECHO_HOST
+              value: "echo.ai.ict.cmcc"
+            - name: AUTH_HOST
+              value: "auth.ict.cmcc"
+            - name: AUTH_REALM
+              value: "employees"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-server
+  namespace: default
+  labels:
+    app: echo-server
+spec:
+  selector:
+    app: echo-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+
+# 入口 Ingress 由 k8s/business-services/echo-server/echo-ingress.yaml 管理
+# （higress standalone，host: echo.ai.ict.cmcc，后端 k8s-echo）
